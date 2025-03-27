@@ -7,6 +7,16 @@ import time
 import shutil
 from datetime import datetime
 
+# ASCII Art Banner
+print(r"""
+████████╗ ██████╗ ███╗   ███╗ █████╗ ████████╗ ██████╗ 
+╚══██╔══╝██╔═══██╗████╗ ████║██╔══██╗╚══██╔══╝██╔═══██╗
+   ██║   ██║   ██║██╔████╔██║███████║   ██║   ██║   ██║
+   ██║   ██║   ██║██║╚██╔╝██║██╔══██║   ██║   ██║   ██║
+   ██║   ╚██████╔╝██║ ╚═╝ ██║██║  ██║   ██║   ╚██████╔╝
+   ╚═╝    ╚═════╝ ╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝    ╚═════╝ 
+""")
+
 # Ensure script runs as root
 if os.geteuid() != 0:
     print("Please run this script as root (sudo).")
